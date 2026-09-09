@@ -1,0 +1,229 @@
+task: [clock] mkdir -p /work/.run && rm -f /work/.run/chain && date -u '+%s %H %u' > /work/.run/start.txt
+task: [session] rm -rf /work/.run/session && mkdir -p /work/.run/session && chmod 700 /work/.run/session
+task: [pull] rc=0; s3 get .state/session.tar.age /work/.run/session.tar.age || rc=$?
+case $rc in 0) ;; 3) echo "no Proton session at .state/session.tar.age: log in on a laptop and run task session-seal" >&2; exit 1 ;; *) exit $rc ;; esac
+
+task: [age] test -n "$MIRROR_AGE_IDENTITY" || { echo "MIRROR_AGE_IDENTITY is unset" >&2; exit 1; }
+k=/work/.run/age.key; mkdir -p /work/.run; install -m 600 /dev/null "$k" && printf '%s\n' "$MIRROR_AGE_IDENTITY" > "$k"
+rc=0
+case decrypt in
+  encrypt) age -r "$(age-keygen -y "$k")" -o /work/.run/session.tar /work/.run/session.tar.age || rc=$? ;;
+  decrypt) age -d -i "$k" -o /work/.run/session.tar /work/.run/session.tar.age || rc=$? ;;
+  *) echo "age: MODE must be encrypt or decrypt" >&2; rc=2 ;;
+esac
+rm -f "$k"; exit $rc
+
+task: [session] tar -xf /work/.run/session.tar -C /work/.run/session auth-session.json clientUid.json && chmod 600 /work/.run/session/*.json
+task: [session] rm -f /work/.run/session.tar /work/.run/session.tar.age
+task: [session] sha256sum /work/.run/session/auth-session.json > /work/.run/session.sha
+task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file proton-drive filesystem list -j "$(dirname "$MIRROR_PROTON_DESTINATION")" > /work/.run/parent.json 2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
+task: [session-push] echo "session: token rotated, sealing it back to the bucket"
+task: [seal] mkdir -p /work/.run && tar -cf /work/.run/session.tar -C /work/.run/session auth-session.json clientUid.json
+task: [age] test -n "$MIRROR_AGE_IDENTITY" || { echo "MIRROR_AGE_IDENTITY is unset" >&2; exit 1; }
+k=/work/.run/age.key; mkdir -p /work/.run; install -m 600 /dev/null "$k" && printf '%s\n' "$MIRROR_AGE_IDENTITY" > "$k"
+rc=0
+case encrypt in
+  encrypt) age -r "$(age-keygen -y "$k")" -o /work/.run/session.tar.age /work/.run/session.tar || rc=$? ;;
+  decrypt) age -d -i "$k" -o /work/.run/session.tar.age /work/.run/session.tar || rc=$? ;;
+  *) echo "age: MODE must be encrypt or decrypt" >&2; rc=2 ;;
+esac
+rm -f "$k"; exit $rc
+
+task: [push] s3 put /work/.run/session.tar.age .state/session.tar.age
+task: [seal] rm -f /work/.run/session.tar /work/.run/session.tar.age
+task: [session-push] sha256sum /work/.run/session/auth-session.json > /work/.run/session.sha
+task: [pd] rc=$(cat /work/.run/pd.rc)
+case " 0 " in *" $rc "*) exit 0 ;; esac
+echo "proton-drive exited $rc; its stderr, $(wc -l < /work/.run/pd.err) lines, is in .run/pd.err" >&2; exit $rc
+
+task: [destination] python3 - "$(basename "$MIRROR_PROTON_DESTINATION")" "$MIRROR_PROTON_DESTINATION_UID" /work/.run/parent.json <<'PY'
+import json, sys
+name, uid, path = sys.argv[1:]
+unwrap = lambda v: v.get("value") if isinstance(v, dict) else v
+nodes = json.load(open(path))
+found = [n for n in nodes if isinstance(n, dict) and unwrap(n.get("name")) == name]
+if len(found) != 1 or unwrap(found[0].get("type")) != "folder":
+    sys.exit(f"destination: {len(found)} folder(s) of that name among {len(nodes)} entries of the parent; expected exactly one")
+if not uid or str(unwrap(found[0].get("uid")) or "") != uid:
+    sys.exit("destination: the folder's UID is not the one the vault names")
+print("destination: the folder and its UID match the vault")
+PY
+
+task: [destination] rm -f /work/.run/parent.json
+task: [list] mkdir -p /work/.run && rm -f /work/.run/repos.txt && touch /work/.run/repos.txt
+task: [list] o=jshvn; tok=$(printenv "MIRROR_GITHUB_TOKEN_$(printf %s "$o" | tr 'a-z-' 'A-Z_')") || { echo "list: no token for $o in the environment" >&2; exit 1; }
+kind=$(curl -fsS --connect-timeout 15 --max-time 120 --retry 3 --retry-connrefused -H "Authorization: Bearer $tok" -H "Accept: application/vnd.github+json" https://api.github.com/users/$o | python3 -c 'import json, sys; print(json.load(sys.stdin)["type"])')
+case $kind in
+  User) url="https://api.github.com/user/repos?affiliation=owner&per_page=100" ;;
+  Organization) url="https://api.github.com/orgs/$o/repos?type=all&per_page=100" ;;
+  *) echo "list: $o is a $kind, neither a user nor an organization" >&2; exit 1 ;;
+esac
+page=1
+while :; do
+  curl -fsS --connect-timeout 15 --max-time 120 --retry 3 --retry-connrefused -H "Authorization: Bearer $tok" -H "Accept: application/vnd.github+json" "$url&page=$page" | python3 -c 'import json, sys; [print(r["full_name"]) for r in json.load(sys.stdin)]' > /work/.run/page.txt
+  if grep -qv "^$o/" /work/.run/page.txt; then echo "list: the token for $o listed another owner's repositories; refusing the listing" >&2; exit 1; fi
+  cat /work/.run/page.txt >> /work/.run/repos.txt
+  test "$(wc -l < /work/.run/page.txt)" -eq 100 || break
+  page=$((page + 1))
+done
+
+task: [list] o=katoptra; tok=$(printenv "MIRROR_GITHUB_TOKEN_$(printf %s "$o" | tr 'a-z-' 'A-Z_')") || { echo "list: no token for $o in the environment" >&2; exit 1; }
+kind=$(curl -fsS --connect-timeout 15 --max-time 120 --retry 3 --retry-connrefused -H "Authorization: Bearer $tok" -H "Accept: application/vnd.github+json" https://api.github.com/users/$o | python3 -c 'import json, sys; print(json.load(sys.stdin)["type"])')
+case $kind in
+  User) url="https://api.github.com/user/repos?affiliation=owner&per_page=100" ;;
+  Organization) url="https://api.github.com/orgs/$o/repos?type=all&per_page=100" ;;
+  *) echo "list: $o is a $kind, neither a user nor an organization" >&2; exit 1 ;;
+esac
+page=1
+while :; do
+  curl -fsS --connect-timeout 15 --max-time 120 --retry 3 --retry-connrefused -H "Authorization: Bearer $tok" -H "Accept: application/vnd.github+json" "$url&page=$page" | python3 -c 'import json, sys; [print(r["full_name"]) for r in json.load(sys.stdin)]' > /work/.run/page.txt
+  if grep -qv "^$o/" /work/.run/page.txt; then echo "list: the token for $o listed another owner's repositories; refusing the listing" >&2; exit 1; fi
+  cat /work/.run/page.txt >> /work/.run/repos.txt
+  test "$(wc -l < /work/.run/page.txt)" -eq 100 || break
+  page=$((page + 1))
+done
+
+task: [list] sort -o /work/.run/repos.txt /work/.run/repos.txt; n=$(wc -l < /work/.run/repos.txt)
+test "$n" -ge 20 || { echo "list: $n repositories is under the floor of 20; refusing to take a short listing for the account" >&2; exit 1; }
+echo "list: $n repositories under jshvn katoptra"
+
+task: [stage] rm -rf /work/staging /work/.run/work && mkdir -p /work/staging /work/.run/work
+task: [stage] i=0
+while IFS=/ read -r o name; do
+  i=$((i + 1))
+  tok=$(printenv "MIRROR_GITHUB_TOKEN_$(printf %s "$o" | tr 'a-z-' 'A-Z_')")
+  auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$tok" | base64 -w0)"
+  w=/work/.run/work/$name.git
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="$auth" \
+    git clone --quiet --mirror "https://github.com/$o/$name.git" "$w" 2> /work/.run/git.err \
+    || { echo "stage: the clone of repository $i of $(wc -l < /work/.run/repos.txt) failed with exit $?; git's stderr is in .run/git.err" >&2; exit 1; }
+  if [ -z "$(git -C "$w" for-each-ref)" ]; then echo "stage: repository $i has no refs, nothing to bundle"; rm -rf "$w"; continue; fi
+  mkdir -p /work/staging/$o
+  git -C "$w" bundle create --quiet /work/staging/$o/$name.bundle --all 2> /work/.run/git.err || { echo "stage: bundling repository $i failed with exit $?" >&2; exit 1; }
+  rm -rf "$w"
+done < /work/.run/repos.txt
+
+task: [stage] find /work/staging -type f -printf '%P\t%s\n' | sort > /work/.run/staged.txt
+task: [stage] echo "stage: $(wc -l < /work/.run/staged.txt) bundles, $(awk -F'\t' '{ s += $2 } END { printf "%.1f", s / 1e6 }' /work/.run/staged.txt) MB"
+task: [upload] test -n "$(ls -A /work/staging 2>/dev/null)" || { echo "upload: staging is empty; stage put nothing there" >&2; exit 1; }
+task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file proton-drive filesystem upload -f create-new-revision -d merge -t --json /work/staging/* "$MIRROR_PROTON_DESTINATION" > /work/.run/upload.json 2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
+task: [session-push] echo "session: token rotated, sealing it back to the bucket"
+task: [seal] mkdir -p /work/.run && tar -cf /work/.run/session.tar -C /work/.run/session auth-session.json clientUid.json
+task: [age] test -n "$MIRROR_AGE_IDENTITY" || { echo "MIRROR_AGE_IDENTITY is unset" >&2; exit 1; }
+k=/work/.run/age.key; mkdir -p /work/.run; install -m 600 /dev/null "$k" && printf '%s\n' "$MIRROR_AGE_IDENTITY" > "$k"
+rc=0
+case encrypt in
+  encrypt) age -r "$(age-keygen -y "$k")" -o /work/.run/session.tar.age /work/.run/session.tar || rc=$? ;;
+  decrypt) age -d -i "$k" -o /work/.run/session.tar.age /work/.run/session.tar || rc=$? ;;
+  *) echo "age: MODE must be encrypt or decrypt" >&2; rc=2 ;;
+esac
+rm -f "$k"; exit $rc
+
+task: [push] s3 put /work/.run/session.tar.age .state/session.tar.age
+task: [seal] rm -f /work/.run/session.tar /work/.run/session.tar.age
+task: [session-push] sha256sum /work/.run/session/auth-session.json > /work/.run/session.sha
+task: [pd] rc=$(cat /work/.run/pd.rc)
+case " 0 1 " in *" $rc "*) exit 0 ;; esac
+echo "proton-drive exited $rc; its stderr, $(wc -l < /work/.run/pd.err) lines, is in .run/pd.err" >&2; exit $rc
+
+task: [confirm] files=$(find /work/staging -type f | wc -l); folders=$(find /work/staging -mindepth 1 -type d | wc -l)
+python3 - "$files" "$folders" /work/.run/upload.json /work/.run/confirm.txt <<'PY'
+import json, sys
+files, folders = int(sys.argv[1]), int(sys.argv[2])
+# The CLI writes progress and its summary as one JSON object per line; the last
+# line carrying transferredItems is the summary.
+summary = None
+for line in open(sys.argv[3]):
+    try:
+        candidate = json.loads(line)
+    except ValueError:
+        continue
+    if isinstance(candidate, dict) and "transferredItems" in candidate:
+        summary = candidate
+if summary is None:
+    sys.exit("confirm: no upload summary in the CLI's output")
+t, s, f = (int(summary.get(k, 0) or 0) for k in ("transferredItems", "skippedItems", "failedItems"))
+verdict = f"{t} uploaded as new files or revisions, {s} skipped as identical, {f} failed, of {files} files in {folders} folders staged"
+ok = f == 0 and t + s == files + folders
+open(sys.argv[4], "w").write(verdict + ("" if ok else " (not confirmed)") + "\n")
+print("confirm: " + verdict)
+sys.exit(0 if ok else 1)
+PY
+
+task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file proton-drive filesystem list -j "$MIRROR_PROTON_DESTINATION/jshvn" > /work/.run/proton-jshvn.json || echo "[]" > /work/.run/proton-jshvn.json 2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
+task: [session-push] echo "session: token rotated, sealing it back to the bucket"
+task: [seal] mkdir -p /work/.run && tar -cf /work/.run/session.tar -C /work/.run/session auth-session.json clientUid.json
+task: [age] test -n "$MIRROR_AGE_IDENTITY" || { echo "MIRROR_AGE_IDENTITY is unset" >&2; exit 1; }
+k=/work/.run/age.key; mkdir -p /work/.run; install -m 600 /dev/null "$k" && printf '%s\n' "$MIRROR_AGE_IDENTITY" > "$k"
+rc=0
+case encrypt in
+  encrypt) age -r "$(age-keygen -y "$k")" -o /work/.run/session.tar.age /work/.run/session.tar || rc=$? ;;
+  decrypt) age -d -i "$k" -o /work/.run/session.tar.age /work/.run/session.tar || rc=$? ;;
+  *) echo "age: MODE must be encrypt or decrypt" >&2; rc=2 ;;
+esac
+rm -f "$k"; exit $rc
+
+task: [push] s3 put /work/.run/session.tar.age .state/session.tar.age
+task: [seal] rm -f /work/.run/session.tar /work/.run/session.tar.age
+task: [session-push] sha256sum /work/.run/session/auth-session.json > /work/.run/session.sha
+task: [pd] rc=$(cat /work/.run/pd.rc)
+case " 0 " in *" $rc "*) exit 0 ;; esac
+echo "proton-drive exited $rc; its stderr, $(wc -l < /work/.run/pd.err) lines, is in .run/pd.err" >&2; exit $rc
+
+task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file proton-drive filesystem list -j "$MIRROR_PROTON_DESTINATION/katoptra" > /work/.run/proton-katoptra.json || echo "[]" > /work/.run/proton-katoptra.json 2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
+task: [session-push] echo "session: token rotated, sealing it back to the bucket"
+task: [seal] mkdir -p /work/.run && tar -cf /work/.run/session.tar -C /work/.run/session auth-session.json clientUid.json
+task: [age] test -n "$MIRROR_AGE_IDENTITY" || { echo "MIRROR_AGE_IDENTITY is unset" >&2; exit 1; }
+k=/work/.run/age.key; mkdir -p /work/.run; install -m 600 /dev/null "$k" && printf '%s\n' "$MIRROR_AGE_IDENTITY" > "$k"
+rc=0
+case encrypt in
+  encrypt) age -r "$(age-keygen -y "$k")" -o /work/.run/session.tar.age /work/.run/session.tar || rc=$? ;;
+  decrypt) age -d -i "$k" -o /work/.run/session.tar.age /work/.run/session.tar || rc=$? ;;
+  *) echo "age: MODE must be encrypt or decrypt" >&2; rc=2 ;;
+esac
+rm -f "$k"; exit $rc
+
+task: [push] s3 put /work/.run/session.tar.age .state/session.tar.age
+task: [seal] rm -f /work/.run/session.tar /work/.run/session.tar.age
+task: [session-push] sha256sum /work/.run/session/auth-session.json > /work/.run/session.sha
+task: [pd] rc=$(cat /work/.run/pd.rc)
+case " 0 " in *" $rc "*) exit 0 ;; esac
+echo "proton-drive exited $rc; its stderr, $(wc -l < /work/.run/pd.err) lines, is in .run/pd.err" >&2; exit $rc
+
+task: [prune] python3 - jshvn katoptra <<'PY' > /work/.run/prune.txt
+import json, sys
+unwrap = lambda v: v.get("value") if isinstance(v, dict) else v
+staged = {line.split("\t")[0] for line in open("/work/.run/staged.txt")}
+for owner in sys.argv[1:]:
+    try:
+        nodes = json.load(open(f"/work/.run/proton-{owner}.json"))
+    except (OSError, ValueError):
+        nodes = []
+    for node in nodes:
+        name = str(unwrap(node.get("name")) or "") if isinstance(node, dict) else ""
+        if name.endswith(".bundle") and f"{owner}/{name}" not in staged:
+            print(f"{owner}/{name}")
+PY
+
+task: [prune] echo "prune: $(wc -l < /work/.run/prune.txt) bundles to trash"
+task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file proton-drive filesystem trash  2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
+task: [session-push] echo "session: token rotated, sealing it back to the bucket"
+task: [seal] mkdir -p /work/.run && tar -cf /work/.run/session.tar -C /work/.run/session auth-session.json clientUid.json
+task: [age] test -n "$MIRROR_AGE_IDENTITY" || { echo "MIRROR_AGE_IDENTITY is unset" >&2; exit 1; }
+k=/work/.run/age.key; mkdir -p /work/.run; install -m 600 /dev/null "$k" && printf '%s\n' "$MIRROR_AGE_IDENTITY" > "$k"
+rc=0
+case encrypt in
+  encrypt) age -r "$(age-keygen -y "$k")" -o /work/.run/session.tar.age /work/.run/session.tar || rc=$? ;;
+  decrypt) age -d -i "$k" -o /work/.run/session.tar.age /work/.run/session.tar || rc=$? ;;
+  *) echo "age: MODE must be encrypt or decrypt" >&2; rc=2 ;;
+esac
+rm -f "$k"; exit $rc
+
+task: [push] s3 put /work/.run/session.tar.age .state/session.tar.age
+task: [seal] rm -f /work/.run/session.tar /work/.run/session.tar.age
+task: [session-push] sha256sum /work/.run/session/auth-session.json > /work/.run/session.sha
+task: [pd] rc=$(cat /work/.run/pd.rc)
+case " 0 " in *" $rc "*) exit 0 ;; esac
+echo "proton-drive exited $rc; its stderr, $(wc -l < /work/.run/pd.err) lines, is in .run/pd.err" >&2; exit $rc
+
+task: [ping] test -z "$HEALTHCHECK_URL" || curl -fsS -m 10 --retry 3 -o /dev/null "$HEALTHCHECK_URL"

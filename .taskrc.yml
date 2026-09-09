@@ -1,0 +1,3 @@
+remote:
+  trusted-hosts: [raw.githubusercontent.com]
+  cache-expiry: 1h

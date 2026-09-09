@@ -1,0 +1,155 @@
+# github: a nightly mirror of every repository under OWNERS into Proton Drive.
+#
+# Each repository becomes one git bundle, <owner>/<name>.bundle under the destination
+# folder: a mirror clone's every ref in one file that `git clone name.bundle` restores.
+# A bundle's bytes are the same on every night the repository did not change, so the
+# proton engine's upload skips it, and a night it changed becomes a new revision in
+# Proton's version history. Nothing is kept between runs but the engine's CLI session.
+#
+# The toolbox and the proton engine are katoptra/lib's, included below at v2 and
+# flattened into this file. What is here is the mirror's own: which owners, the floor
+# under a listing, the two hooks the engine leaves to a mirror (stage, prune), its rows
+# of the report, and the offline check of the assumption everything rests on.
+version: '3'
+
+vars:
+  OWNERS: jshvn katoptra
+  # A listing under this many repositories is a broken token or a broken API, never an
+  # account that emptied itself; stage refuses it, so prune can never trash on one.
+  LIST_FLOOR: 20
+  API: https://api.github.com
+  CURL: curl -fsS --connect-timeout 15 --max-time 120 --retry 3 --retry-connrefused
+  ACCEPT: 'Accept: application/vnd.github+json'
+
+includes:
+  toolbox:
+    taskfile: https://raw.githubusercontent.com/katoptra/lib/v2/toolbox.yml
+    flatten: true
+    excludes: [report-engine, report-mirror]
+    vars:
+      NAME: github
+      DESC: a nightly mirror of every repository under jshvn and katoptra into Proton Drive
+      IMAGE: ghcr.io/katoptra/toolbox:proton-v2
+      MENU: >-
+        ""
+        "${c}write -- changes Proton Drive${r}"
+        "  task session-seal -- .run/pd   Encrypt a laptop Proton CLI session into R2"
+        "  task empty-trash               Permanently delete Proton trash (never scheduled)"
+        ""
+        "${c}checks -- offline, no credentials${r}"
+        "  task run -- task offline       Bundle a throwaway repository twice; the two must match"
+  proton:
+    taskfile: https://raw.githubusercontent.com/katoptra/lib/v2/engines/proton.yml
+    flatten: true
+    excludes: [stage, prune]
+
+tasks:
+  # ---- the upstream ----
+  list:
+    desc: Every repository under each of OWNERS, as owner/name lines in RUN/repos.txt
+    set: [pipefail]
+    cmds:
+      - mkdir -p {{.RUN}} && rm -f {{.RUN}}/repos.txt && touch {{.RUN}}/repos.txt
+      # A user token lists that user's own repositories and an org token the org's; the
+      # endpoint follows the owner's kind. Each is read a page at a time until a short one.
+      - for: {var: OWNERS}
+        cmd: |
+          o={{.ITEM}}; tok=$(printenv "MIRROR_GITHUB_TOKEN_$(printf %s "$o" | tr 'a-z-' 'A-Z_')") || { echo "list: no token for $o in the environment" >&2; exit 1; }
+          kind=$({{.CURL}} -H "Authorization: Bearer $tok" -H "{{.ACCEPT}}" {{.API}}/users/$o | python3 -c 'import json, sys; print(json.load(sys.stdin)["type"])')
+          case $kind in
+            User) url="{{.API}}/user/repos?affiliation=owner&per_page=100" ;;
+            Organization) url="{{.API}}/orgs/$o/repos?type=all&per_page=100" ;;
+            *) echo "list: $o is a $kind, neither a user nor an organization" >&2; exit 1 ;;
+          esac
+          page=1
+          while :; do
+            {{.CURL}} -H "Authorization: Bearer $tok" -H "{{.ACCEPT}}" "$url&page=$page" | python3 -c 'import json, sys; [print(r["full_name"]) for r in json.load(sys.stdin)]' > {{.RUN}}/page.txt
+            if grep -qv "^$o/" {{.RUN}}/page.txt; then echo "list: the token for $o listed another owner's repositories; refusing the listing" >&2; exit 1; fi
+            cat {{.RUN}}/page.txt >> {{.RUN}}/repos.txt
+            test "$(wc -l < {{.RUN}}/page.txt)" -eq 100 || break
+            page=$((page + 1))
+          done
+      - |
+        sort -o {{.RUN}}/repos.txt {{.RUN}}/repos.txt; n=$(wc -l < {{.RUN}}/repos.txt)
+        test "$n" -ge {{.LIST_FLOOR}} || { echo "list: $n repositories is under the floor of {{.LIST_FLOOR}}; refusing to take a short listing for the account" >&2; exit 1; }
+        echo "list: $n repositories under {{.OWNERS}}"
+
+  # ---- the engine's hooks ----
+  stage:
+    desc: list, then clone each repository as a mirror and bundle it into STAGING/<owner>/<name>.bundle
+    cmds:
+      - {task: list}
+      - rm -rf {{.STAGING}} {{.RUN}}/work && mkdir -p {{.STAGING}} {{.RUN}}/work
+      # The token reaches git as a header through its environment, never on a command line,
+      # and git's stderr goes to a file: a clone error names the repository, and the log is
+      # public. A repository with no refs yet has nothing to bundle. Bundles are
+      # byte-for-byte reproducible for an unchanged repository (offline checks this), which
+      # is what lets the engine skip them.
+      - |
+        i=0
+        while IFS=/ read -r o name; do
+          i=$((i + 1))
+          tok=$(printenv "MIRROR_GITHUB_TOKEN_$(printf %s "$o" | tr 'a-z-' 'A-Z_')")
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$tok" | base64 -w0)"
+          w={{.RUN}}/work/$name.git
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="$auth" \
+            git clone --quiet --mirror "https://github.com/$o/$name.git" "$w" 2> {{.RUN}}/git.err \
+            || { echo "stage: the clone of repository $i of $(wc -l < {{.RUN}}/repos.txt) failed with exit $?; git's stderr is in .run/git.err" >&2; exit 1; }
+          if [ -z "$(git -C "$w" for-each-ref)" ]; then echo "stage: repository $i has no refs, nothing to bundle"; rm -rf "$w"; continue; fi
+          mkdir -p {{.STAGING}}/$o
+          git -C "$w" bundle create --quiet {{.STAGING}}/$o/$name.bundle --all 2> {{.RUN}}/git.err || { echo "stage: bundling repository $i failed with exit $?" >&2; exit 1; }
+          rm -rf "$w"
+        done < {{.RUN}}/repos.txt
+      - find {{.STAGING}} -type f -printf '%P\t%s\n' | sort > {{.RUN}}/staged.txt
+      - 'echo "stage: $(wc -l < {{.RUN}}/staged.txt) bundles, $(awk -F''\t'' ''{ s += $2 } END { printf "%.1f", s / 1e6 }'' {{.RUN}}/staged.txt) MB"'
+
+  prune:
+    desc: Trash the bundles in Proton whose repository is no longer listed; a renamed one is trashed under its old name and uploaded under the new
+    cmds:
+      - for: {var: OWNERS}
+        task: list-folder
+        vars: {FOLDER: '$MIRROR_PROTON_DESTINATION/{{.ITEM}}', OUT: '{{.RUN}}/proton-{{.ITEM}}.json'}
+      - |
+        python3 - {{.OWNERS}} <<'PY' > {{.RUN}}/prune.txt
+        import json, sys
+        unwrap = lambda v: v.get("value") if isinstance(v, dict) else v
+        staged = {line.split("\t")[0] for line in open("{{.RUN}}/staged.txt")}
+        for owner in sys.argv[1:]:
+            try:
+                nodes = json.load(open(f"{{.RUN}}/proton-{owner}.json"))
+            except (OSError, ValueError):
+                nodes = []
+            for node in nodes:
+                name = str(unwrap(node.get("name")) or "") if isinstance(node, dict) else ""
+                if name.endswith(".bundle") and f"{owner}/{name}" not in staged:
+                    print(f"{owner}/{name}")
+        PY
+      - 'echo "prune: $(wc -l < {{.RUN}}/prune.txt) bundles to trash"'
+      - task: trash
+        vars:
+          PATHS:
+            sh: 'test -s {{.RUN}}/prune.txt && sed "s|^|$MIRROR_PROTON_DESTINATION/|" {{.RUN}}/prune.txt | tr "\n" " " || true'
+
+  report-mirror:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        n() { test -f "$1" && wc -l < "$1" || echo 0; }
+        cat >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}" <<EOF
+        | Repositories | $(n {{.RUN}}/repos.txt) listed under {{.OWNERS}}, $(n {{.RUN}}/staged.txt) bundled |
+        | Pruned | $(n {{.RUN}}/prune.txt) bundles trashed |
+        EOF
+
+  # ---- checks ----
+  offline:
+    desc: Bundle a throwaway repository twice and compare; the engine skips a bundle only because this holds
+    cmds:
+      - rm -rf {{.RUN}}/fixture && git init -q {{.RUN}}/fixture
+      - git -C {{.RUN}}/fixture -c user.name=offline -c user.email=offline@localhost commit -q --allow-empty -m one
+      - git -C {{.RUN}}/fixture -c user.name=offline -c user.email=offline@localhost commit -q --allow-empty -m two
+      - git -C {{.RUN}}/fixture bundle create --quiet {{.RUN}}/one.bundle --all
+      - git -C {{.RUN}}/fixture bundle create --quiet {{.RUN}}/two.bundle --all
+      - cmp {{.RUN}}/one.bundle {{.RUN}}/two.bundle
+      - test "$(git -C {{.RUN}}/fixture bundle list-heads {{.RUN}}/one.bundle | wc -l)" -ge 2
+      - 'echo "offline: two bundles of one repository are identical"'
