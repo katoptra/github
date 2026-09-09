@@ -55,14 +55,15 @@ skip rests on it.
 - **[go-task](https://taskfile.dev/)**: `brew install go-task`.
 - **The 1Password CLI** `op`, signed in, for anything that needs the vault on the laptop.
 - **Accounts**: two GitHub tokens, Proton Drive, a Cloudflare R2 bucket, a healthchecks.io
-  check, and a 1Password vault dedicated to this repo.
+  check, and a 1Password vault.
 
 ## 🚀 First-time setup
 
 Every value that names an account is stored in the vault and referenced in
-[op.env](op.env), ten `op://katoptra-github/<item>/<field>` lines:
+[op.env](op.env), ten `op://<vault>/github/<section>/<field>` lines, one item with five
+sections:
 
-| Item | Fields | Reaches a run as |
+| Section | Fields | Reaches a run as |
 |---|---|---|
 | `github` | `token_jshvn`, `token_katoptra` | `MIRROR_GITHUB_TOKEN_JSHVN`, `MIRROR_GITHUB_TOKEN_KATOPTRA` |
 | `proton` | `destination`, `destination_uid` | `MIRROR_PROTON_DESTINATION`, `MIRROR_PROTON_DESTINATION_UID` |
@@ -70,14 +71,16 @@ Every value that names an account is stored in the vault and referenced in
 | `age` | `identity` | `MIRROR_AGE_IDENTITY` |
 | `healthcheck` | `url` | `HEALTHCHECK_URL` |
 
-1. **1Password.** Create the vault `katoptra-github` and a service account scoped to it
-   alone. Store the service-account token as the one repository secret,
-   `OP_SERVICE_ACCOUNT_TOKEN`.
+1. **1Password.** An item `github` with the five sections above, in the vault `op.env`
+   names by UUID. This organization keeps one vault, `Katoptra`, with one item per mirror,
+   and one service account that reads it, stored as the organization secret
+   `OP_SERVICE_ACCOUNT_TOKEN`. A fork makes its own vault and service account and puts
+   the token in a repository secret of the same name.
 2. **GitHub.** One fine-grained personal access token per owner, since a fine-grained token
    has exactly one resource owner: one with jshvn as the owner, one with katoptra, each
    for all repositories with `Contents: read` and `Metadata: read` and nothing else. The
    mirror can never write to GitHub. An owner whose token lists another owner's
-   repositories fails the run. Store them as the two fields of item `github`.
+   repositories fails the run. Store them as the two fields of section `github`.
 3. **Proton Drive.** The CLI can only be seeded by a browser sign-in, so the session is
    made once on the laptop and carried to CI encrypted. It is this mirror's own: two
    mirrors sharing one session race its rotating refresh token, and the loser needs a
