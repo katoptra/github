@@ -1,7 +1,20 @@
-# github
+<p align="center">
+  <a href="https://github.com/katoptra">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://katoptra.org/brand/katoptra-mark-dark-224.png">
+      <img src="https://katoptra.org/brand/katoptra-mark-224.png" alt="Katoptra" width="112">
+    </picture>
+  </a>
+</p>
 
-[![sync](https://github.com/katoptra/github/actions/workflows/sync.yml/badge.svg)](https://github.com/katoptra/github/actions/workflows/sync.yml)
-[![license](https://img.shields.io/github/license/katoptra/github)](LICENSE)
+<h1 align="center">github</h1>
+
+<p align="center">A nightly mirror of GitHub repositories into Proton Drive, one bundle each.</p>
+
+<p align="center">
+  <a href="https://github.com/katoptra/github/actions/workflows/sync.yml"><img src="https://github.com/katoptra/github/actions/workflows/sync.yml/badge.svg" alt="sync"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/katoptra/github" alt="license"></a>
+</p>
 
 A nightly mirror of every repository under the GitHub owners it names into one Proton
 Drive folder. Each repository becomes one git bundle, `<owner>/<name>.bundle`: a mirror
