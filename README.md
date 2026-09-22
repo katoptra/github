@@ -14,6 +14,7 @@
 <p align="center">
   <a href="https://github.com/katoptra/github/actions/workflows/sync.yml"><img src="https://github.com/katoptra/github/actions/workflows/sync.yml/badge.svg" alt="sync"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/katoptra/github" alt="license"></a>
+  <a href="https://github.com/katoptra/github/actions/workflows/sync.yml"><img src="https://healthchecks.io/b/2/875451ff-376b-4fb7-b7c1-40278e873faf.svg" alt="mirror"></a>
 </p>
 
 A nightly mirror of every repository under the GitHub owners it names into one Proton
