@@ -8,7 +8,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: katoptra/lib/.github/actions/toolbox@fe8162386f612ddb4e5c886632fa7a8d74c54d9f # v2.2.0
+      - uses: katoptra/lib/.github/actions/toolbox@f7b2a879da8006fa84d08e1c6e501af70821a9a1 # v2.2.1
         with: {op: 'false'}
       - run: task check
       - run: task run -- task offline
