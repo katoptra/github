@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       vars:
-        description: 'KEY=value pairs for the pipeline; none are read today'
+        description: 'KEY=value pairs for all the tasks. LIST_FLOOR and OWNERS here change prune.'
         type: string
         default: ''
 permissions:

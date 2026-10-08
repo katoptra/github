@@ -1,4 +1,4 @@
-# github: a nightly mirror of every repository under OWNERS into Proton Drive.
+# github: a daily mirror of every repository under OWNERS into Proton Drive.
 #
 # Each repository becomes one git bundle, <owner>/<name>.bundle under the destination
 # folder: a mirror clone's every ref in one file that `git clone name.bundle` restores.
@@ -25,11 +25,10 @@ includes:
   toolbox:
     taskfile: https://raw.githubusercontent.com/katoptra/lib/v2/toolbox.yml
     flatten: true
-    excludes: [report-engine, report-mirror]
+    excludes: [report-mirror]
     vars:
       NAME: github
-      DESC: a nightly mirror of every repository under jshvn and katoptra into Proton Drive
-      IMAGE: ghcr.io/katoptra/toolbox:proton-v2
+      DESC: a daily mirror of every repository under {{.OWNERS}} into Proton Drive
       MENU: >-
         ""
         "${c}write -- changes Proton Drive${r}"
