@@ -21,16 +21,16 @@ part of the engine.
 ## Constraints
 
 - **Where a change goes.** `Taskfile.yml` has these verbs: `list`, `stage`, `prune`,
-  `report-mirror` and `offline`. Make all other changes to verbs in lib's proton engine. Then
-  each proton mirror gets them.
+  `report-mirror` and `offline`. Make all other changes to verbs in lib: in the toolbox or in
+  the proton engine. Then each mirror that includes that file gets the change.
 - **Excludes.** The `excludes:` of the two includes contain these verbs:
   - On the toolbox include: `report-mirror`
   - On the proton include: `stage` and `prune`, the two hooks of the engine.
 - **Root vars.** Root vars hold only the values of this mirror. Do not put an engine default
   in a root var, because then the command line cannot set it
   ([lib README, Rules a mirror keeps](https://github.com/katoptra/lib#rules-a-mirror-keeps)).
-  `OWNERS` and `LIST_FLOOR` are the identity of the mirror. `API`, `CURL` and `ACCEPT` are
-  only for `list`.
+  `OWNERS` and `LIST_FLOOR` are root vars of this mirror. `API`, `CURL` and `ACCEPT` are
+  also root vars, only for `list`.
 - **Storage.** For each change that adds storage, calculate the new storage. Compare it with
   the baseline (31 bundles and 325.7 MB, the run of 2026-10-08) and with the storage limit of
   the Proton plan.

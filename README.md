@@ -70,7 +70,7 @@ flowchart LR
 - **Root vars.** Root vars hold only the values of this mirror. Do not put an engine default
   in a root var, because then the command line cannot set it
   ([lib README, Rules a mirror keeps](https://github.com/katoptra/lib#rules-a-mirror-keeps)).
-  Two root vars are the identity of the mirror:
+  `API`, `CURL` and `ACCEPT` are only for `list`. This mirror has two more root vars:
   - `OWNERS` gives the GitHub users or organizations that the mirror copies.
   - `LIST_FLOOR` is the floor of a listing. `list` rejects a listing that has less than
     `LIST_FLOOR` repositories. Thus, the empty listing of an incorrect token cannot cause
