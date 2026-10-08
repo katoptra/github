@@ -8,7 +8,10 @@ on:
         default: ''
 permissions:
   contents: read
-  actions: write   # the called workflow chains a run that left .run/chain; this one never does, but a called workflow cannot raise this
+  # The sync workflow of lib starts the next run if a run writes .run/chain. The runs of
+  # this mirror do not write that file. But the workflow of lib cannot have more
+  # permissions than this workflow gives it.
+  actions: write
 concurrency: {group: sync, cancel-in-progress: false}
 jobs:
   sync:

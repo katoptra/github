@@ -1,21 +1,33 @@
-# github: a daily mirror of every repository under OWNERS into Proton Drive.
+# This mirror keeps a copy of each GitHub repository of the owners in OWNERS, in one
+# Proton Drive folder. Each copy is one git bundle, and the mirror updates the copies
+# daily. katoptra/lib supplies the toolbox and the proton engine, and this file includes
+# the two at v2 with `flatten: true`. The README of lib gives the items that each of the
+# two supplies. The other items in this file are only for this mirror:
+#   - OWNERS: the owners of the repositories
+#   - LIST_FLOOR: the minimum number of repositories in a listing
+#   - list: the verb that gets the repositories of each owner from the GitHub API
+#   - stage and prune: the two hooks that the engine lets a mirror write
+#   - report-mirror: the rows of the mirror in the run summary
+#   - offline: the check that two bundles of one repository have the same bytes, a
+#     condition that is necessary for this mirror
 #
-# Each repository becomes one git bundle, <owner>/<name>.bundle under the destination
-# folder: a mirror clone's every ref in one file that `git clone name.bundle` restores.
-# A bundle's bytes are the same on every night the repository did not change, so the
-# proton engine's upload skips it, and a night it changed becomes a new revision in
-# Proton's version history. Nothing is kept between runs but the engine's CLI session.
+# op.env contains the names of the secrets. `op run` gets their values from the vault,
+# and each secret goes into the image by its name.
 #
-# The toolbox and the proton engine are katoptra/lib's, included below at v2 and
-# flattened into this file. What is here is the mirror's own: which owners, the floor
-# under a listing, the two hooks the engine leaves to a mirror (stage, prune), its rows
-# of the report, and the offline check of the assumption everything rests on.
+# A bundle is one file with all the refs of a mirror clone, at <owner>/<name>.bundle in
+# the destination folder. `git clone name.bundle` gets the repository back from it. If a
+# repository does not change, its bundle has the same bytes in each run. Thus, the upload
+# of the proton engine does not send it again. If a repository changes, its bundle
+# becomes a new revision in the version history of Proton. Between runs, the mirror keeps
+# only the CLI session of the engine.
 version: '3'
 
 vars:
   OWNERS: jshvn katoptra
-  # A listing under this many repositories is a broken token or a broken API, never an
-  # account that emptied itself; stage refuses it, so prune can never trash on one.
+  # If a listing has less than this number of repositories, a token or the API does not
+  # operate correctly. An account that removed its repositories is not the cause. stage
+  # rejects such a listing. Thus, prune cannot move bundles to the trash because of it.
+  # The vars input of the sync workflow can change this value.
   LIST_FLOOR: 20
   API: https://api.github.com
   CURL: curl -fsS --connect-timeout 15 --max-time 120 --retry 3 --retry-connrefused
@@ -49,8 +61,10 @@ tasks:
     set: [pipefail]
     cmds:
       - mkdir -p {{.RUN}} && rm -f {{.RUN}}/repos.txt && touch {{.RUN}}/repos.txt
-      # A user token lists that user's own repositories and an org token the org's; the
-      # endpoint follows the owner's kind. Each is read a page at a time until a short one.
+      # With a user token, the API gives the repositories of that user. With an
+      # organization token, the API gives the repositories of the organization. The verb
+      # selects the endpoint for the type of the owner. It reads the list of each owner one
+      # page at a time, until a page has less than 100 repositories.
       - for: {var: OWNERS}
         cmd: |
           o={{.ITEM}}; tok=$(printenv "MIRROR_GITHUB_TOKEN_$(printf %s "$o" | tr 'a-z-' 'A-Z_')") || { echo "list: no token for $o in the environment" >&2; exit 1; }
@@ -73,17 +87,18 @@ tasks:
         test "$n" -ge {{.LIST_FLOOR}} || { echo "list: $n repositories is under the floor of {{.LIST_FLOOR}}; refusing to take a short listing for the account" >&2; exit 1; }
         echo "list: $n repositories under {{.OWNERS}}"
 
-  # ---- the engine's hooks ----
+  # ---- the hooks of the engine ----
   stage:
     desc: list, then clone each repository as a mirror and bundle it into STAGING/<owner>/<name>.bundle
     cmds:
       - {task: list}
       - rm -rf {{.STAGING}} {{.RUN}}/work && mkdir -p {{.STAGING}} {{.RUN}}/work
-      # The token reaches git as a header through its environment, never on a command line,
-      # and git's stderr goes to a file: a clone error names the repository, and the log is
-      # public. A repository with no refs yet has nothing to bundle. Bundles are
-      # byte-for-byte reproducible for an unchanged repository (offline checks this), which
-      # is what lets the engine skip them.
+      # The token goes to git as a header in the environment of git, not on a command
+      # line. A clone error shows the name of the repository, and all persons can read the
+      # run log. Thus, the stderr of git goes to a file. stage makes no bundle for an empty
+      # repository, which has no refs. If a repository does not change, its bundle has the
+      # same bytes each time (offline examines this). Thus, the engine does not upload the
+      # bundle again.
       - |
         i=0
         while IFS=/ read -r o name; do
