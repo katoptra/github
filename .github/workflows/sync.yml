@@ -3,15 +3,18 @@ on:
   workflow_dispatch:
     inputs:
       vars:
-        description: 'KEY=value pairs for the pipeline; none are read today'
+        description: 'KEY=value pairs for all the tasks. LIST_FLOOR and OWNERS here change prune.'
         type: string
         default: ''
 permissions:
   contents: read
-  actions: write   # the called workflow chains a run that left .run/chain; this one never does, but a called workflow cannot raise this
+  # The sync workflow of lib starts the next run if a run writes .run/chain. The runs of
+  # this mirror do not write that file. But the workflow of lib cannot have more
+  # permissions than this workflow gives it.
+  actions: write
 concurrency: {group: sync, cancel-in-progress: false}
 jobs:
   sync:
-    uses: katoptra/lib/.github/workflows/sync.yml@fe8162386f612ddb4e5c886632fa7a8d74c54d9f # v2.2.0
+    uses: katoptra/lib/.github/workflows/sync.yml@36d75e6b21473400b5b15003025d9a2e81d4eeea # v2.6.0
     with: {vars: '${{ inputs.vars }}', timeout-minutes: 90}
     secrets: inherit
