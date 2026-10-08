@@ -27,10 +27,10 @@ The Proton CLI does not upload a file that is the same as the file in Proton Dri
 run uploads no file for that repository. If a repository changed, its bundle becomes a new
 revision. Thus, the version history in Proton Drive is the history of the mirror.
 
-Between runs, the mirror keeps only the session of the Proton CLI, encrypted, in a bucket.
+Between runs, the mirror keeps only the encrypted session of the Proton CLI in a bucket.
 
 This is a public repository. It contains no credential and no account identifier. These are
-in one vault, and a run gets each value by its name.
+in one vault. A run uses the name of each value to get it.
 
 ## How to use
 
@@ -47,8 +47,8 @@ previous runs are its version history. The Proton plan has a limit on the number
 revisions.
 
 If the listing from GitHub does not contain a repository, the mirror moves its bundle to the
-trash in Proton Drive. If a repository gets a new name, the mirror moves the bundle with the
-previous name to the trash. Then it uploads a bundle with the new name.
+trash in Proton Drive. If a repository gets a new name, the mirror uploads a bundle with the
+new name. Then it moves the bundle with the previous name to the trash.
 
 ## How it works
 
@@ -67,12 +67,16 @@ flowchart LR
 
 [`Taskfile.yml`](Taskfile.yml) contains the parts of this mirror:
 
-- **The root vars** are the identity of the mirror. `OWNERS` gives the GitHub users or
-  organizations that the mirror copies. If a listing has less than `LIST_FLOOR`
-  repositories, `list` rejects it. Thus, the empty listing of an incorrect token cannot
-  cause `prune` to move bundles to the trash. But the `vars` input of `sync.yml` can set
-  `LIST_FLOOR` and `OWNERS` for `list` and `prune`, and `LIST_FLOOR=0` there removes this
-  guard.
+- **Root vars.** Root vars hold only the values of this mirror. Do not put an engine default
+  in a root var, because then the command line cannot set it
+  ([lib README, Rules a mirror keeps](https://github.com/katoptra/lib#rules-a-mirror-keeps)).
+  Two root vars are the identity of the mirror:
+  - `OWNERS` gives the GitHub users or organizations that the mirror copies.
+  - `LIST_FLOOR` is the floor of a listing. `list` rejects a listing that has less than
+    `LIST_FLOOR` repositories. Thus, the empty listing of an incorrect token cannot cause
+    `prune` to move bundles to the trash. But the `vars` input of `sync.yml` can set
+    `LIST_FLOOR` and `OWNERS` for `list` and `prune`, and `LIST_FLOOR=0` there removes this
+    guard.
 - **`stage`** is the hook of the engine that fills the staging tree. First, it runs `list`.
   `list` gets each repository of each owner from the API, with the token of that owner. It
   rejects a listing that contains a repository of a different owner. Then `stage` does
@@ -88,7 +92,7 @@ flowchart LR
   repository that did not change must give the same bundle, byte for byte. If the bundle
   changes, the upload sends it again at each run.
 
-These steps are verbs of the engine:
+The engine has these verbs:
 
 - The session
 - The destination check
@@ -120,7 +124,8 @@ Proton Drive contains the mirror.
 | An API token with Object Read & Write, for that bucket only | It gives the `r2` values in step 3 |
 
 [lib, Storage](https://github.com/katoptra/lib#storage) gives the keys that the engine keeps
-in a bucket. It also gives the cause of a session without history.
+in a bucket. [lib, The session](https://github.com/katoptra/lib#the-session) gives the cause
+of a session without history.
 
 ### 3. Secrets
 
@@ -144,7 +149,7 @@ organization or on the repository.
 
 Each reference uses the UUID of the vault, not its name.
 [lib, Secrets](https://github.com/katoptra/lib#secrets) tells how to find the UUID, and gives
-the cause.
+the cause of this rule.
 
 ### 4. GitHub and Proton
 
@@ -153,9 +158,9 @@ has only one resource owner. Give each token access to all repositories, with
 `Contents: read`, `Metadata: read` and no other permission. Thus, the mirror cannot write to
 GitHub. Put each token in the field `token_<owner>` of the section `github`.
 
-**The session.** Only a sign-in in a browser can make a session for the Proton CLI. Thus, you
-make the session one time, on a laptop. Then each run gets the encrypted session from the
-bucket. [lib, The session](https://github.com/katoptra/lib#the-session) gives:
+**The session.** Only a sign-in in a browser can make a session for the Proton CLI. Make the
+session one time, on a laptop. Then each run gets the encrypted session from the bucket.
+[lib, The session](https://github.com/katoptra/lib#the-session) gives:
 
 - The commands
 - How to make the folder and find its UID
@@ -182,12 +187,12 @@ task plan                   # the real thing, read-only: session, destination, l
 ```
 
 Pause the healthcheck before the first run. Then, in Actions, open the sync workflow. Click
-**Run workflow**. The first run uploads each bundle. After that, a run on a day with no change
-uploads no bundle.
+**Run workflow**. The first run uploads each bundle. After that, a run uploads no bundle if no
+repository changed.
 
-No file in this repository starts a run on a schedule. To start runs on a schedule, add a
-`schedule:` trigger to `.github/workflows/sync.yml`. Or dispatch the workflow from an external
-scheduler. This mirror uses an external scheduler.
+No part of this repository starts a run. To schedule runs, add a `schedule:` trigger to
+`.github/workflows/sync.yml`. Or dispatch the workflow from an external scheduler. This mirror
+uses an external scheduler.
 
 ## Operating it
 
@@ -202,11 +207,14 @@ gh workflow run sync.yml        # one run in Actions
 ```
 
 Do not run `task sync`, `task plan` or `task empty-trash` on a laptop while an Actions run can
-be in progress. [lib, The session](https://github.com/katoptra/lib#the-session) gives the risk.
+be in progress. The two runs use one session, and then a new login can be necessary
+([lib, The session](https://github.com/katoptra/lib#the-session)).
 
 Each run adds one table to its job page, with these rows:
 
 - The start of the run
+- The image
+- The next run
 - The files and the MB in the staging tree
 - The result from Proton: "uploaded", "skipped as identical" and "failed"
 - The session: "restored" or "not restored"
@@ -214,8 +222,9 @@ Each run adds one table to its job page, with these rows:
 - The bundles that the run moved to the trash.
 
 After a run with no change, the Proton row shows "0 uploaded" and "N skipped as identical".
-N is the number of bundles plus the number of owner folders. A run failure is the only
-alert: if a day has no ping, healthchecks.io sends an e-mail.
+N is the number of bundles plus the number of owner folders.
+
+A run failure is the only alert: if a day has no ping, healthchecks.io sends an e-mail.
 
 Each person can read the run logs:
 [lib, Monitoring](https://github.com/katoptra/lib#monitoring) gives the data that a run writes
@@ -230,8 +239,8 @@ If a run has a problem, find it in this list:
   UID is different from the UID in the vault. Get the listing of the parent folder with
   `filesystem list -j`. Then correct the field or the folder.
 - **`list` rejects a listing.** The listing has less than `LIST_FLOOR` repositories, or it
-  contains a repository of a different owner. The cause is an incorrect token, or a token
-  after its expiration date. The run moved no bundle to the trash.
+  contains a repository of a different owner. The cause is an incorrect token or an expired
+  token. The run moved no bundle to the trash.
 - **`confirm` stops the run.** The summary from Proton does not include each staged file.
   The next run tries all the bundles again. The CLI does not send a bundle again if Proton
   Drive has the same file.
