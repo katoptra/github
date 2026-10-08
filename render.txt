@@ -16,7 +16,7 @@ rm -f "$k"; exit $rc
 task: [session] tar -xf /work/.run/session.tar -C /work/.run/session auth-session.json clientUid.json && chmod 600 /work/.run/session/*.json
 task: [session] rm -f /work/.run/session.tar /work/.run/session.tar.age
 task: [session] sha256sum /work/.run/session/auth-session.json > /work/.run/session.sha
-task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file proton-drive filesystem list -j "$(dirname "$MIRROR_PROTON_DESTINATION")" > /work/.run/parent.json 2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
+task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session proton-drive filesystem list -j "$(dirname "$MIRROR_PROTON_DESTINATION")" > /work/.run/parent.json 2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
 task: [session-push] echo "session: token rotated, sealing it back to the bucket"
 task: [seal] mkdir -p /work/.run && tar -cf /work/.run/session.tar -C /work/.run/session auth-session.json clientUid.json
 task: [age] test -n "$MIRROR_AGE_IDENTITY" || { echo "MIRROR_AGE_IDENTITY is unset" >&2; exit 1; }
@@ -106,7 +106,7 @@ done < /work/.run/repos.txt
 task: [stage] find /work/staging -type f -printf '%P\t%s\n' | sort > /work/.run/staged.txt
 task: [stage] echo "stage: $(wc -l < /work/.run/staged.txt) bundles, $(awk -F'\t' '{ s += $2 } END { printf "%.1f", s / 1e6 }' /work/.run/staged.txt) MB"
 task: [upload] test -n "$(ls -A /work/staging 2>/dev/null)" || { echo "upload: staging is empty; stage put nothing there" >&2; exit 1; }
-task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file proton-drive filesystem upload -f create-new-revision -d merge -t --json /work/staging/* "$MIRROR_PROTON_DESTINATION" > /work/.run/upload.json 2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
+task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session proton-drive filesystem upload -f create-new-revision -d merge -t --json /work/staging/* "$MIRROR_PROTON_DESTINATION" > /work/.run/upload.json 2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
 task: [session-push] echo "session: token rotated, sealing it back to the bucket"
 task: [seal] mkdir -p /work/.run && tar -cf /work/.run/session.tar -C /work/.run/session auth-session.json clientUid.json
 task: [age] test -n "$MIRROR_AGE_IDENTITY" || { echo "MIRROR_AGE_IDENTITY is unset" >&2; exit 1; }
@@ -130,8 +130,9 @@ task: [confirm] files=$(find /work/staging -type f | wc -l); folders=$(find /wor
 python3 - "$files" "$folders" /work/.run/upload.json /work/.run/confirm.txt <<'PY'
 import json, sys
 files, folders = int(sys.argv[1]), int(sys.argv[2])
-# The CLI writes progress and its summary as one JSON object per line; the last
-# line carrying transferredItems is the summary.
+# While the upload continues, the CLI writes one JSON object on each line. Its
+# summary is also one JSON object on a line. The last line with transferredItems
+# is the summary.
 summary = None
 for line in open(sys.argv[3]):
     try:
@@ -150,7 +151,7 @@ print("confirm: " + verdict)
 sys.exit(0 if ok else 1)
 PY
 
-task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file proton-drive filesystem list -j "$MIRROR_PROTON_DESTINATION/jshvn" > /work/.run/proton-jshvn.json || echo "[]" > /work/.run/proton-jshvn.json 2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
+task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session proton-drive filesystem list -j "$MIRROR_PROTON_DESTINATION/jshvn" > /work/.run/proton-jshvn.json || echo "[]" > /work/.run/proton-jshvn.json 2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
 task: [session-push] echo "session: token rotated, sealing it back to the bucket"
 task: [seal] mkdir -p /work/.run && tar -cf /work/.run/session.tar -C /work/.run/session auth-session.json clientUid.json
 task: [age] test -n "$MIRROR_AGE_IDENTITY" || { echo "MIRROR_AGE_IDENTITY is unset" >&2; exit 1; }
@@ -170,7 +171,7 @@ task: [pd] rc=$(cat /work/.run/pd.rc)
 case " 0 " in *" $rc "*) exit 0 ;; esac
 echo "proton-drive exited $rc; its stderr, $(wc -l < /work/.run/pd.err) lines, is in .run/pd.err" >&2; exit $rc
 
-task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file proton-drive filesystem list -j "$MIRROR_PROTON_DESTINATION/katoptra" > /work/.run/proton-katoptra.json || echo "[]" > /work/.run/proton-katoptra.json 2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
+task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session proton-drive filesystem list -j "$MIRROR_PROTON_DESTINATION/katoptra" > /work/.run/proton-katoptra.json || echo "[]" > /work/.run/proton-katoptra.json 2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
 task: [session-push] echo "session: token rotated, sealing it back to the bucket"
 task: [seal] mkdir -p /work/.run && tar -cf /work/.run/session.tar -C /work/.run/session auth-session.json clientUid.json
 task: [age] test -n "$MIRROR_AGE_IDENTITY" || { echo "MIRROR_AGE_IDENTITY is unset" >&2; exit 1; }
@@ -206,7 +207,7 @@ for owner in sys.argv[1:]:
 PY
 
 task: [prune] echo "prune: $(wc -l < /work/.run/prune.txt) bundles to trash"
-task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file proton-drive filesystem trash  2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
+task: [pd] rc=0; PROTON_DRIVE_CACHE_DIR=/work/.run/session proton-drive filesystem trash  2> /work/.run/pd.err || rc=$?; echo $rc > /work/.run/pd.rc
 task: [session-push] echo "session: token rotated, sealing it back to the bucket"
 task: [seal] mkdir -p /work/.run && tar -cf /work/.run/session.tar -C /work/.run/session auth-session.json clientUid.json
 task: [age] test -n "$MIRROR_AGE_IDENTITY" || { echo "MIRROR_AGE_IDENTITY is unset" >&2; exit 1; }
