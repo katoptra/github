@@ -9,7 +9,7 @@
 
 <h1 align="center">github</h1>
 
-<p align="center">A nightly mirror of GitHub repositories into Proton Drive, one bundle each.</p>
+<p align="center">A daily mirror of GitHub repositories into Proton Drive, one bundle for each repository.</p>
 
 <p align="center">
   <a href="https://github.com/katoptra/github/actions/workflows/sync.yml"><img src="https://github.com/katoptra/github/actions/workflows/sync.yml/badge.svg" alt="sync"></a>
@@ -17,20 +17,24 @@
   <a href="https://github.com/katoptra/github/actions/workflows/sync.yml"><img src="https://healthchecks.io/b/2/875451ff-376b-4fb7-b7c1-40278e873faf.svg" alt="mirror"></a>
 </p>
 
-A nightly mirror of every repository under the GitHub owners it names into one Proton
-Drive folder. Each repository becomes one git bundle, `<owner>/<name>.bundle`: a mirror
-clone's every ref, branches, tags and pull-request heads, in one file that `git clone`
-restores. A repository that did not change uploads nothing, because its bundle's bytes
-are the same and Proton's CLI skips a file whose content it already holds; one that
-changed becomes a new revision, and Proton's version history is the history of the
-mirror. Nothing is kept between runs but the Proton CLI session, encrypted in a bucket.
+This mirror copies each repository of the GitHub owners in `OWNERS` into one Proton Drive
+folder, daily. Each repository becomes one git bundle, `<owner>/<name>.bundle`. A bundle is
+one file with all the refs of a mirror clone (the branches, the tags and the pull-request
+heads). `git clone` makes the repository again from that file.
 
-The repository is public and holds no account: every credential and every account
-identifier lives in one vault and reaches a run by name.
+If a repository did not change, its bundle has the same bytes as the bundle of the last run.
+The Proton CLI does not upload a file that is the same as the file in Proton Drive. Thus, the
+run uploads no file for that repository. If a repository changed, its bundle becomes a new
+revision. Thus, the version history in Proton Drive is the history of the mirror.
+
+Between runs, the mirror keeps only the session of the Proton CLI, encrypted, in a bucket.
+
+This is a public repository. It contains no credential and no account identifier. These are
+in one vault, and a run gets each value by its name.
 
 ## How to use
 
-A bundle is a repository. To get one back:
+A bundle is a repository. Use these commands to get a repository from its bundle:
 
 ```sh
 git clone owner/name.bundle name        # every branch, tag and pull-request head
@@ -38,16 +42,19 @@ git -C name remote set-url origin https://github.com/owner/name.git
 git bundle list-heads owner/name.bundle # what it carries, without cloning
 ```
 
-Last night's copy is the current revision in Proton Drive; earlier nights are its
-version history, as many as the plan keeps. A repository that left GitHub is in Proton's
-trash under its old name, and a renamed one is trashed under the old name and uploaded
-under the new.
+The copy from the last run is the newest revision in Proton Drive. The copies from the
+previous runs are its version history. The Proton plan has a limit on the number of
+revisions.
+
+If the listing from GitHub does not contain a repository, the mirror moves its bundle to the
+trash in Proton Drive. If a repository gets a new name, the mirror moves the bundle with the
+previous name to the trash. Then it uploads a bundle with the new name.
 
 ## How it works
 
-Once a night a GitHub Actions job runs this pipeline inside the toolbox image from
-[katoptra/lib](https://github.com/katoptra/lib). Every solid box is a verb of lib's
-proton engine; the dashed ones are this mirror's own.
+A GitHub Actions job operates this pipeline daily, in the toolbox image of
+[katoptra/lib](https://github.com/katoptra/lib). In the diagram, each dashed box is a verb of
+this mirror. Each other box is a verb of the toolbox or of the proton engine of lib.
 
 ```mermaid
 flowchart LR
@@ -58,83 +65,115 @@ flowchart LR
   class stage,list,prune,rm own
 ```
 
-What this mirror owns, in [`Taskfile.yml`](Taskfile.yml):
+[`Taskfile.yml`](Taskfile.yml) contains the parts of this mirror:
 
-- **Its identity**, in root vars: `OWNERS`, the GitHub users or organizations to mirror,
-  and `LIST_FLOOR`, the count under which a listing is refused, so a broken token can
-  never turn an empty listing into a trash list.
-- **`stage`**, the engine's hook for filling the staging tree. It runs `list`, which asks
-  the API for every repository under each owner with that owner's token and refuses a
-  listing that names another owner's repositories, then clones each as a mirror, bundles
-  it with `git bundle create --all`, and deletes the clone.
-- **`prune`**, the engine's hook for what upstream dropped: list each owner's folder in
-  Proton and trash the bundles whose repository is no longer listed.
-- **Its rows of the run summary**, and `offline`, which bundles a throwaway repository
-  twice inside the image and compares: the skip rests on bundles being byte-for-byte
-  reproducible for an unchanged repository.
+- **The root vars** are the identity of the mirror. `OWNERS` gives the GitHub users or
+  organizations that the mirror copies. If a listing has less than `LIST_FLOOR`
+  repositories, `list` rejects it. Thus, the empty listing of an incorrect token cannot
+  cause `prune` to move bundles to the trash. But the `vars` input of `sync.yml` can set
+  `LIST_FLOOR` and `OWNERS` for `list` and `prune`, and `LIST_FLOOR=0` there removes this
+  guard.
+- **`stage`** is the hook of the engine that fills the staging tree. First, it runs `list`.
+  `list` gets each repository of each owner from the API, with the token of that owner. It
+  rejects a listing that contains a repository of a different owner. Then `stage` does
+  these steps for each repository:
+  1. It clones the repository as a mirror.
+  2. It makes a bundle of the clone with `git bundle create --all`.
+  3. It deletes the clone.
+- **`prune`** is the hook of the engine for the repositories that upstream does not have.
+  It gets the listing of the folder of each owner in Proton Drive. Then it moves a bundle to
+  the trash if the listing from GitHub does not contain its repository.
+- **`report-mirror`** adds the rows of this mirror to the run summary.
+- **`offline`** makes two bundles of a test repository in the image, and compares them. A
+  repository that did not change must give the same bundle, byte for byte. If the bundle
+  changes, the upload sends it again at each run.
 
-The session, the destination check, the one-call upload and its confirmation are the
-engine's and are documented once in
-[lib's README](https://github.com/katoptra/lib#the-proton-engine).
+These steps are verbs of the engine:
+
+- The session
+- The destination check
+- The upload in one CLI call
+- The check of the upload.
+
+Only [lib's README](https://github.com/katoptra/lib#the-proton-engine) tells how they operate.
 
 ## Want your own?
 
 ### 1. Fork it
 
-Fork [katoptra/github](https://github.com/katoptra/github). One line of `Taskfile.yml` is
-yours to change, `OWNERS`; each owner needs a token line in `op.env` named
-`MIRROR_GITHUB_TOKEN_<OWNER>`. Set `LIST_FLOOR` to about half the repositories you have.
+Fork [katoptra/github](https://github.com/katoptra/github). Then set two root vars in
+`Taskfile.yml`:
+
+- Set `OWNERS` to your GitHub users and organizations.
+- Set `LIST_FLOOR` to approximately half the number of your repositories.
+
+For each owner, add a token line to `op.env`, with the name `MIRROR_GITHUB_TOKEN_<OWNER>`.
 
 ### 2. Storage
 
-The bucket holds one object, the encrypted Proton CLI session, under `.state/`. Proton
-holds the mirror.
+The bucket contains one object: the encrypted session of the Proton CLI, in `.state/`.
+Proton Drive contains the mirror.
 
-| What | Why |
+| Item | Function |
 |---|---|
-| An R2 bucket, or any S3-compatible bucket | The session |
-| An API token with Object Read & Write, scoped to that bucket | The `r2` values in step 3 |
+| An R2 bucket, or a bucket of a different S3-compatible service | It contains the session |
+| An API token with Object Read & Write, for that bucket only | It gives the `r2` values in step 3 |
 
-What the engine keeps in a bucket and why the session gets no history:
-[lib, Storage](https://github.com/katoptra/lib#storage).
+[lib, Storage](https://github.com/katoptra/lib#storage) gives the keys that the engine keeps
+in a bucket. It also gives the cause of a session without history.
 
 ### 3. Secrets
 
-Ten values, in one vault item named `github`, one section per service:
+Put ten values (for two owners) in one vault item with the name `github`. Use one section
+for each service:
 
-| Section | Field | What it is | Reaches the run as |
+| Section | Field | Value | Name in the run |
 |---|---|---|---|
-| `github` | `token_<owner>`, one per owner | A fine-grained token, step 4 | `MIRROR_GITHUB_TOKEN_<OWNER>` |
+| `github` | `token_<owner>`, one for each owner | A fine-grained token, step 4 | `MIRROR_GITHUB_TOKEN_<OWNER>` |
 | `proton` | `destination` | The CLI path of the folder, `/my-files/GitHub` | `MIRROR_PROTON_DESTINATION` |
-| `proton` | `destination_uid` | That folder's UID | `MIRROR_PROTON_DESTINATION_UID` |
+| `proton` | `destination_uid` | The UID of that folder | `MIRROR_PROTON_DESTINATION_UID` |
 | `r2` | `access_key_id`, `secret_access_key` | The token from step 2 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `r2` | `endpoint` | `https://<account-id>.r2.cloudflarestorage.com` | `AWS_ENDPOINT_URL_S3` |
-| `r2` | `bucket` | The bucket's name | `MIRROR_R2_BUCKET` |
+| `r2` | `bucket` | The name of the bucket | `MIRROR_R2_BUCKET` |
 | `age` | `identity` | An `AGE-SECRET-KEY-...` line from `age-keygen` | `MIRROR_AGE_IDENTITY` |
 | `healthcheck` | `url` | Optional: a healthchecks.io ping URL | `HEALTHCHECK_URL` |
 
-Put your vault's UUID into the references in [`op.env`](op.env), make a service account
-that can read that vault, and store its token as the `OP_SERVICE_ACCOUNT_TOKEN` secret,
-on the organization or on the repository. Finding a vault's UUID and why a UUID and not
-a name: [lib, Secrets](https://github.com/katoptra/lib#secrets).
+Put the UUID of your vault in the references in [`op.env`](op.env). Make a service account
+that can read that vault. Put its token in the `OP_SERVICE_ACCOUNT_TOKEN` secret, on the
+organization or on the repository.
+
+Each reference uses the UUID of the vault, not its name.
+[lib, Secrets](https://github.com/katoptra/lib#secrets) tells how to find the UUID, and gives
+the cause.
 
 ### 4. GitHub and Proton
 
-**Tokens.** One fine-grained personal access token per owner, since a fine-grained token
-has exactly one resource owner: for all repositories, with `Contents: read` and
-`Metadata: read` and nothing else. The mirror can never write to GitHub. Store each as
-the `token_<owner>` field of section `github`.
+**Tokens.** Make one fine-grained personal access token for each owner. A fine-grained token
+has only one resource owner. Give each token access to all repositories, with
+`Contents: read`, `Metadata: read` and no other permission. Thus, the mirror cannot write to
+GitHub. Put each token in the field `token_<owner>` of the section `github`.
 
-**The session.** The Proton CLI can only be seeded by a browser sign-in, so the session
-is made once on a laptop and carried to every run encrypted; the commands, the folder and
-its UID, and `task session-seal -- .run/pd` are in
-[lib, The session](https://github.com/katoptra/lib#the-session). Store the folder's CLI
-path as `destination` and its `uid` from the listing as `destination_uid`. This mirror's
-session is its own: two mirrors sharing one race its rotating refresh token.
+**The session.** Only a sign-in in a browser can make a session for the Proton CLI. Thus, you
+make the session one time, on a laptop. Then each run gets the encrypted session from the
+bucket. [lib, The session](https://github.com/katoptra/lib#the-session) gives:
 
-### 5. Prove it, run it, schedule it
+- The commands
+- How to make the folder and find its UID
+- `task session-seal -- .run/pd`.
 
-On a laptop with go-task, the 1Password CLI and Docker or Apple `container`:
+Put the CLI path of the folder in the field `destination`. Put the `uid` of the folder from
+the listing in the field `destination_uid`. This mirror has a session that no other mirror
+uses.
+
+### 5. Do the checks, run it, schedule it
+
+Use a laptop with these tools:
+
+- go-task
+- The 1Password CLI
+- Docker or Apple `container`.
+
+Run these commands:
 
 ```sh
 task check                  # every pipeline command rendered inside the image, diffed against render.txt
@@ -142,51 +181,80 @@ task run -- task offline    # the bundle reproducibility check; no network
 task plan                   # the real thing, read-only: session, destination, list, clone and bundle; nothing uploaded
 ```
 
-Then Actions, sync, Run workflow. The first run uploads every bundle; a quiet night
-afterwards uploads none. Nothing in this repository schedules a run: add a `schedule:`
-trigger to `.github/workflows/sync.yml`, or dispatch it from outside as this mirror is.
+Pause the healthcheck before the first run. Then, in Actions, open the sync workflow. Click
+**Run workflow**. The first run uploads each bundle. After that, a run on a day with no change
+uploads no bundle.
+
+No file in this repository starts a run on a schedule. To start runs on a schedule, add a
+`schedule:` trigger to `.github/workflows/sync.yml`. Or dispatch the workflow from an external
+scheduler. This mirror uses an external scheduler.
 
 ## Operating it
 
-`task` alone prints the menu. Everything runs inside the toolbox.
+`task` without a task name prints the menu. Each task operates in the toolbox.
 
 ```sh
 task sync                       # one run, the same thing Actions runs
 task plan                       # read-only: list, clone and bundle; prints what an upload would carry
 task session-seal -- .run/pd    # encrypt a laptop Proton CLI session into the bucket
 task empty-trash                # permanently delete Proton's trash; asks first; never scheduled
+gh workflow run sync.yml        # one run in Actions
 ```
 
-Never run `task sync` or `task plan` from a laptop while an Actions run may be in
-progress: both hold the one Proton session, and the loser of a race needs a fresh login.
+Do not run `task sync`, `task plan` or `task empty-trash` on a laptop while an Actions run can
+be in progress. [lib, The session](https://github.com/katoptra/lib#the-session) gives the risk.
 
-Every run appends one table to its job page: when it started, the files and MB staged,
-what Proton reported (uploaded, skipped as identical, failed), whether the session was
-restored, repositories listed and bundled, bundles pruned. A quiet night reads "0
-uploaded, N skipped as identical", N being the bundles plus their owner folders. A failed
-run is the only alert: healthchecks.io emails when a night passes without a ping.
+Each run adds one table to its job page, with these rows:
 
-On a public repository the run logs are public. They carry counts and never a repository
-name, a path in Proton, a token or an account identifier: git's stderr goes to a file, a
-failure names a repository by its position in the listing, and the CLI's stderr goes to
-`.run/pd.err`.
+- The start of the run
+- The files and the MB in the staging tree
+- The result from Proton: "uploaded", "skipped as identical" and "failed"
+- The session: "restored" or "not restored"
+- The repositories in the listing, and the bundles that the run made
+- The bundles that the run moved to the trash.
 
-- **The run fails at `session`.** The session is gone or its token was rotated out from
-  under it. Sign in again on a laptop and `task session-seal -- .run/pd`.
-- **`destination` refuses the run.** The folder is not a direct child of its parent, or
-  its UID differs from the vault's. List the parent with `filesystem list -j` and fix the
-  field or the folder.
-- **`list` refuses a listing.** Under `LIST_FLOOR`, or the token listed another owner's
-  repositories: a wrong or expired token. Nothing was trashed.
-- **`confirm` fails.** Proton's summary did not account for every staged file. The next
-  night retries everything, which costs nothing for what already landed.
+After a run with no change, the Proton row shows "0 uploaded" and "N skipped as identical".
+N is the number of bundles plus the number of owner folders. A run failure is the only
+alert: if a day has no ping, healthchecks.io sends an e-mail.
+
+Each person can read the run logs:
+[lib, Monitoring](https://github.com/katoptra/lib#monitoring) gives the data that a run writes
+to them.
+
+If a run has a problem, find it in this list:
+
+- **The run stops at `session`.** The bucket has no session, or a different process changed
+  the token of the session. Make a new session on a laptop. Then run
+  `task session-seal -- .run/pd`.
+- **`destination` stops the run.** The folder is not directly in its parent folder, or its
+  UID is different from the UID in the vault. Get the listing of the parent folder with
+  `filesystem list -j`. Then correct the field or the folder.
+- **`list` rejects a listing.** The listing has less than `LIST_FLOOR` repositories, or it
+  contains a repository of a different owner. The cause is an incorrect token, or a token
+  after its expiration date. The run moved no bundle to the trash.
+- **`confirm` stops the run.** The summary from Proton does not include each staged file.
+  The next run tries all the bundles again. The CLI does not send a bundle again if Proton
+  Drive has the same file.
+- **The run did not start.** No part of this repository starts a run. Examine the scheduler
+  ([katoptra/dispatch](https://github.com/katoptra/dispatch#when-something-goes-wrong)).
+  Then run `gh workflow view sync.yml` to find if the workflow is disabled. Until you
+  correct the cause, start runs with `gh workflow run sync.yml`.
 
 ## Reference
 
-Issues, pull-request discussion, release notes and attachments are not in git and
-GitHub's migration export API is closed to ordinary accounts, so they are not here. A
-wiki would be one more clone each; no repository under either owner has one today.
+These items are not in git:
 
-Pull requests are welcome.
+- Issues
+- The comments on pull requests
+- Release notes
+- Attached files.
+
+GitHub does not let usual accounts use its migration export API. Thus, this mirror does not
+contain these items.
+
+The mirror does not copy wikis. Each wiki is one more clone for its repository. No
+repository of the two owners has a wiki.
+
+You can send pull requests.
 
 MIT licensed. Built by [Josh Vaughen](https://ijosh.com).
