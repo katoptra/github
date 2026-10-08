@@ -237,8 +237,9 @@ If a run has a problem, find it in this list:
   Drive has the same file.
 - **The run did not start.** No part of this repository starts a run. Examine the scheduler
   ([katoptra/dispatch](https://github.com/katoptra/dispatch#when-something-goes-wrong)).
-  Then run `gh workflow view sync.yml` to find if the workflow is disabled. Until you
-  correct the cause, start runs with `gh workflow run sync.yml`.
+  Then run `gh workflow list --all` to find if a person disabled the workflow. A disabled
+  workflow shows `disabled_manually`, not `active`. Until you correct the cause, start runs
+  with `gh workflow run sync.yml`.
 
 ## Reference
 
@@ -255,6 +256,6 @@ contain these items.
 The mirror does not copy wikis. Each wiki is one more clone for its repository. No
 repository of the two owners has a wiki.
 
-You can send pull requests.
+Pull requests are welcome.
 
 MIT licensed. Built by [Josh Vaughen](https://ijosh.com).
