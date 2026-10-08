@@ -12,7 +12,7 @@
 #     condition that is necessary for this mirror
 #
 # op.env contains the names of the secrets. `op run` gets their values from the vault,
-# and each secret goes into the image by its name.
+# and each secret goes into the image with its name.
 #
 # A bundle is one file with all the refs of a mirror clone, at <owner>/<name>.bundle in
 # the destination folder. `git clone name.bundle` gets the repository back from it. If a
@@ -63,8 +63,8 @@ tasks:
       - mkdir -p {{.RUN}} && rm -f {{.RUN}}/repos.txt && touch {{.RUN}}/repos.txt
       # With a user token, the API gives the repositories of that user. With an
       # organization token, the API gives the repositories of the organization. The verb
-      # selects the endpoint for the type of the owner. It reads the list of each owner one
-      # page at a time, until a page has less than 100 repositories.
+      # selects the endpoint for the type of the owner. It reads the listing of each owner
+      # one page at a time, until a page has less than 100 repositories.
       - for: {var: OWNERS}
         cmd: |
           o={{.ITEM}}; tok=$(printenv "MIRROR_GITHUB_TOKEN_$(printf %s "$o" | tr 'a-z-' 'A-Z_')") || { echo "list: no token for $o in the environment" >&2; exit 1; }
@@ -93,12 +93,12 @@ tasks:
     cmds:
       - {task: list}
       - rm -rf {{.STAGING}} {{.RUN}}/work && mkdir -p {{.STAGING}} {{.RUN}}/work
-      # The token goes to git as a header in the environment of git, not on a command
-      # line. A clone error shows the name of the repository, and all persons can read the
-      # run log. Thus, the stderr of git goes to a file. stage makes no bundle for an empty
-      # repository, which has no refs. If a repository does not change, its bundle has the
-      # same bytes each time (offline examines this). Thus, the engine does not upload the
-      # bundle again.
+      # All persons can read the run log. Thus, the token goes to git as a header in the
+      # environment of git, not on a command line. The stderr of git goes to .run/git.err,
+      # not to the run log, because a clone error shows the name of the repository. stage
+      # makes no bundle for an empty repository, which has no refs. If a repository does
+      # not change, its bundle has the same bytes each time (offline examines this). Thus,
+      # the engine does not upload the bundle again.
       - |
         i=0
         while IFS=/ read -r o name; do
