@@ -72,11 +72,11 @@ flowchart LR
   ([lib README, Rules a mirror keeps](https://github.com/katoptra/lib#rules-a-mirror-keeps)).
   `API`, `CURL` and `ACCEPT` are only for `list`. This mirror has two more root vars:
   - `OWNERS` gives the GitHub users or organizations that the mirror copies.
-  - `LIST_FLOOR` is the floor of a listing. `list` rejects a listing that has less than
-    `LIST_FLOOR` repositories. Thus, the empty listing of an incorrect token cannot cause
-    `prune` to move bundles to the trash. But the `vars` input of `sync.yml` can set
-    `LIST_FLOOR` and `OWNERS` for `list` and `prune`, and `LIST_FLOOR=0` there removes this
-    guard.
+  - `LIST_FLOOR` is the minimum number of repositories in a listing. `list` rejects a
+    listing that has less than `LIST_FLOOR` repositories. Thus, the empty listing of an
+    incorrect token cannot cause `prune` to move bundles to the trash. But the `vars` input
+    of `sync.yml` can set `LIST_FLOOR` and `OWNERS` for `list` and `prune`, and
+    `LIST_FLOOR=0` there removes this guard.
 - **`stage`** is the hook of the engine that fills the staging tree. First, it runs `list`.
   `list` gets each repository of each owner from the API, with the token of that owner. It
   rejects a listing that contains a repository of a different owner. Then `stage` does
