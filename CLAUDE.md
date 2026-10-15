@@ -12,8 +12,8 @@ The README of [katoptra/lib](https://github.com/katoptra/lib) is the manual for 
 engine and for the parts that more than one mirror uses. This file gives the rules that each
 change must obey.
 
-No part of this repository starts a run. An external scheduler dispatches `sync.yml` daily,
-at 17:42 UTC.
+No part of this repository starts a run. An external scheduler dispatches `sync.yml`. Only
+the scheduler has the times of the runs.
 
 `Taskfile.yml` and its comments are the design of the parts of this mirror. The pipeline is a
 part of the engine.
@@ -64,8 +64,9 @@ part of the engine.
 - **If a repository gets a new name, its bundle with the previous name goes to the trash.**
   The mirror uploads a bundle with the new name. The trash in Proton Drive keeps the
   previous bundle. Only a person runs `empty-trash`, and it shows a prompt first.
-- **A run failure is the only alert.** The healthcheck in healthchecks.io has the cron
-  `42 17 * * *` UTC and a grace time of 3 hours.
+- **A run failure is the only alert.** The healthcheck in healthchecks.io has a cron
+  expression with the same times as the slots of the mirror, in UTC, and a grace time of 3
+  hours.
 
 ## Verifying a change
 
